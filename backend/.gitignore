@@ -4,3 +4,4 @@ __pycache__/
 instance/
 .envtarget/ 
 target/ 
+.env 
