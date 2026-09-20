@@ -2,6 +2,5 @@ venv/
 __pycache__/
 *.pyc
 instance/
-.envtarget/ 
-target/ 
-.env 
+.env
+target/
