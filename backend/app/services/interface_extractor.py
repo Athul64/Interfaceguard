@@ -1,25 +1,29 @@
-import subprocess
-import json
-import tempfile
-import os
+import javalang
 
-JAR_PATH = os.path.join(os.path.dirname(__file__), "..", "tools", "javaparser-bridge", "target", "javaparser-bridge-1.0.jar")
 
 def extract_interfaces(source_code: str, file_path: str) -> list[dict]:
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".java", delete=False) as f:
-        f.write(source_code)
-        temp_path = f.name
-
     try:
-        result = subprocess.run(
-            ["java", "-jar", JAR_PATH, temp_path],
-            capture_output=True, text=True, timeout=10
-        )
-        interfaces = json.loads(result.stdout) if result.stdout.strip() else []
-        for iface in interfaces:
-            iface["file_path"] = file_path
-        return interfaces
-    except (subprocess.TimeoutExpired, json.JSONDecodeError):
+        tree = javalang.parse.parse(source_code)
+    except (javalang.parser.JavaSyntaxError, javalang.tokenizer.LexerError):
         return []
-    finally:
-        os.unlink(temp_path)
+
+    interfaces = []
+    for _, node in tree.filter(javalang.tree.InterfaceDeclaration):
+        methods = []
+        for method in node.methods:
+            param_types = [
+                getattr(p.type, "name", str(p.type)) for p in method.parameters
+            ]
+            return_type = (
+                "void" if method.return_type is None
+                else getattr(method.return_type, "name", str(method.return_type))
+            )
+            methods.append({
+                "name": method.name,
+                "params": len(method.parameters),
+                "param_types": param_types,
+                "return_type": return_type,
+            })
+        interfaces.append({"name": node.name, "file_path": file_path, "methods": methods})
+
+    return interfaces

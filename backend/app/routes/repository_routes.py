@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from app.models import db, Repository, Commit, Interface
+from app.models import db, Repository, Commit, Interface, InterfaceSnapshot
 from app.services.validation import validate_github_url, validate_config
 from app.services.analysis_service import analyze_repository
 
@@ -64,3 +64,9 @@ def list_commits(repository_id):
 def list_interfaces(repository_id):
     interfaces = Interface.query.filter_by(repository_id=repository_id).all()
     return jsonify([i.to_dict() for i in interfaces]), 200
+
+@repository_bp.route("/interfaces/<int:interface_id>/snapshots", methods=["GET"])
+def list_snapshots(interface_id):
+    snapshots = (InterfaceSnapshot.query.filter_by(interface_id=interface_id)
+                 .join(Commit).order_by(Commit.commit_date).all())
+    return jsonify([s.to_dict() for s in snapshots]), 200
