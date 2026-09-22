@@ -2,8 +2,38 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  font-family: 'Raleway', sans-serif;
-  background: radial-gradient(120% 120% at 15% -10%, #31445c 0%, #30425a 55%, #263447 100%);
+:root {
+  --bg-page: #F3F5F3;
+  --bg-surface: #FFFFFF;
+  --accent: #1B6A4C;
+  --accent-hover: #14533B;
+  --accent-light: #2A8C66;
+  --accent-wash: rgba(27, 106, 76, 0.08);
+  --accent-wash-strong: rgba(27, 106, 76, 0.14);
+  --text-primary: #121B16;
+  --text-secondary: #4A5B52;
+  --text-muted: #798C81;
+  --border: rgba(18, 27, 22, 0.11);
+  --border-focus: #1B6A4C;
+  --diff-add-bg: rgba(27, 106, 76, 0.08);
+  --diff-add-text: #176345;
+  --diff-rm-bg: rgba(194, 62, 46, 0.08);
+  --diff-rm-text: #B43324;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
   min-height: 100vh;
+  background-color: var(--bg-page);
+  background-image: radial-gradient(var(--border) 1px, transparent 1px);
+  background-size: 24px 24px;
+  color: var(--text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
