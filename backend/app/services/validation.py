@@ -6,7 +6,14 @@ GITHUB_URL_PATTERN = re.compile(r"^https://github\.com/[\w.-]+/[\w.-]+/?$")
 
 
 def validate_github_url(url: str, check_remote: bool = True) -> tuple[bool, str]:
-    if not url or not GITHUB_URL_PATTERN.match(url.strip()):
+    if not url:
+        return False, "Enter a valid GitHub repository URL, e.g. https://github.com/owner/repo"
+
+    # Allow local bundled sample repositories
+    if url.startswith("sample-repositories") or (os.path.isdir(url) and os.path.exists(os.path.join(url, ".git"))):
+        return True, ""
+
+    if not GITHUB_URL_PATTERN.match(url.strip()):
         return False, "Enter a valid GitHub repository URL, e.g. https://github.com/owner/repo"
 
     if not check_remote:
