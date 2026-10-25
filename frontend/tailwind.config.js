@@ -1,32 +1,86 @@
+/** @type {import('tailwindcss').Config} */
 export default {
-  content: ['./index.html', './src/**/*.{js,jsx}'],
+  content: ['./index.html', './src/**/*.{js,jsx,ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        // Legacy colors kept for any other pages that may use them
-        navy1: '#30425a',
-        navy2: '#31445c',
-        cream: '#e8dcc4',
-        // New design tokens
-        accent: '#1B6A4C',
-        'accent-hover': '#14533B',
-        'accent-light': '#2A8C66',
-        page: '#F3F5F3',
-        surface: '#FFFFFF',
-        'text-primary': '#121B16',
-        'text-secondary': '#4A5B52',
-        'text-muted': '#798C81',
+        background: 'var(--background)',
+        foreground: 'var(--foreground)',
+        card: {
+          DEFAULT: 'var(--card)',
+          foreground: 'var(--card-foreground)',
+        },
+        popover: {
+          DEFAULT: 'var(--popover)',
+          foreground: 'var(--popover-foreground)',
+        },
+        primary: {
+          DEFAULT: 'var(--primary)',
+          foreground: 'var(--primary-foreground)',
+        },
+        secondary: {
+          DEFAULT: 'var(--secondary)',
+          foreground: 'var(--secondary-foreground)',
+        },
+        muted: {
+          DEFAULT: 'var(--muted)',
+          foreground: 'var(--muted-foreground)',
+        },
+        accent: {
+          DEFAULT: 'var(--accent)',
+          foreground: 'var(--accent-foreground)',
+        },
+        destructive: {
+          DEFAULT: 'var(--destructive)',
+          foreground: 'var(--destructive-foreground)',
+        },
+        border: 'var(--border)',
+        input: 'var(--input)',
+        ring: 'var(--ring)',
+        forest: {
+          DEFAULT: 'var(--forest)',
+          deep: '#213129',
+          soft: '#DFE5DF',
+        },
+        clay: {
+          DEFAULT: 'var(--clay)',
+          soft: '#F2DED6',
+        },
+        cream: {
+          DEFAULT: 'var(--cream)',
+        },
+        charcoal: {
+          DEFAULT: 'var(--charcoal)',
+        },
+        amber: {
+          DEFAULT: 'var(--amber)',
+          soft: '#EEE1C7',
+        },
+        paper: {
+          DEFAULT: 'var(--paper)',
+        },
+        healthy: {
+          DEFAULT: 'var(--healthy)',
+        },
+        line: {
+          DEFAULT: '#D4D1C8',
+        },
       },
       fontFamily: {
-        raleway: ['Raleway', 'sans-serif'],
-        inter: ['Inter', 'system-ui', 'sans-serif'],
-        fraunces: ['Fraunces', 'Georgia', 'serif'],
-        mono: ['"IBM Plex Mono"', 'monospace'],
+        sans: ['Outfit', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        display: ['"Plus Jakarta Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        serif: ['"Cormorant Garamond"', 'Georgia', 'serif'],
+        mono: ['"IBM Plex Mono"', 'ui-monospace', 'monospace'],
+        heading: ['"Plus Jakarta Sans"', 'sans-serif'],
+        body: ['Outfit', 'sans-serif'],
+        accent: ['"Cormorant Garamond"', 'serif'],
       },
       borderRadius: {
-        sm: '7px',
-        md: '10px',
-        lg: '16px',
+        sm: 'calc(var(--radius) - 2px)',
+        DEFAULT: 'var(--radius)',
+        md: 'var(--radius)',
+        lg: 'calc(var(--radius) + 2px)',
+        xl: 'calc(var(--radius) + 8px)',
       },
     },
   },
