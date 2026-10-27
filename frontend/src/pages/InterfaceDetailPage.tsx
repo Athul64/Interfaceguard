@@ -1,57 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { FilePlus2, GitCompare, Sparkles, Loader2, AlertTriangle, CheckCircle2, Layers, ShieldAlert } from "lucide-react";
+import { FilePlus2, GitCompare, Sparkles, Loader2, AlertTriangle } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { btn, EmptyState, PageHeader, SectionTitle, Shell, SeverityBadge, Tip, TrendTag } from "@/components/ig";
 import { Severity, Trend, normalizeSeverity, normalizeTrend } from "@/lib/data";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/context/AppContext";
 import { fetchInterfaceDetail, fetchInterfaceHistory, requestInterfaceExplanation } from "@/services/api";
-
-function parseSteps(text?: string): string[] {
-  if (!text) return [];
-  const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
-  if (lines.length > 1) {
-    return lines.map((l) => l.replace(/^[-*•\d.]+\s*/, ''));
-  }
-  const parts = text.split(/(?:\s|^)\d+\.\s+/).map((s) => s.trim()).filter(Boolean);
-  if (parts.length > 1) return parts;
-  return [text];
-}
-
-function parseBreakdown(text?: string): { name: string; methods: string[] }[] {
-  if (!text) return [];
-  const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
-  const items: { name: string; methods: string[] }[] = [];
-  for (const line of lines) {
-    const clean = line.replace(/^[-*•]\s*/, '');
-    const colonIdx = clean.indexOf(':');
-    if (colonIdx > 0) {
-      const name = clean.slice(0, colonIdx).trim();
-      const rawMethods = clean
-        .slice(colonIdx + 1)
-        .split(',')
-        .map((m) => m.trim().replace(/[\[\]]/g, ''))
-        .filter(Boolean);
-      items.push({ name, methods: rawMethods });
-    } else {
-      items.push({ name: clean, methods: [] });
-    }
-  }
-  return items;
-}
-
-function parseRisks(text?: string): { risk: string; mitigation?: string } {
-  if (!text) return { risk: "" };
-  const match = text.match(/(?:mitigation(?:s|\s+strategies|\s+strategy)?:?)\s*(.*)/i);
-  if (match) {
-    return {
-      risk: text.slice(0, match.index).trim(),
-      mitigation: match[1].trim(),
-    };
-  }
-  return { risk: text };
-}
 
 export default function InterfaceDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -150,12 +105,6 @@ export default function InterfaceDetailPage() {
   const findingsList = data.findings || [];
   const explanation = data.explanation;
   const changePointsList = data.change_points || [];
-
-  const hasAiExplanation = Boolean(
-    explanation &&
-    explanation.is_ai_generated &&
-    (explanation.explanation_text || explanation.explanation)
-  );
 
   const health = Math.round(snap.health_score ?? 100);
   const sev = normalizeSeverity(snap.severity, health);
@@ -368,23 +317,21 @@ export default function InterfaceDetailPage() {
           <div className="flex flex-wrap items-center gap-2">
             <Sparkles className="size-4 text-forest" />
             <span className="eyebrow">
-              Architectural Explanation · {hasAiExplanation ? "On-Demand Analysis" : "Deferred"}
+              Architectural Explanation · {explanation?.is_ai_generated ? "AI-Generated" : "On-Demand Analysis"}
             </span>
             <span
               className={cn(
                 "rounded-sm px-2 py-0.5 font-mono text-[11px]",
-                hasAiExplanation
+                explanation?.is_ai_generated
                   ? "bg-forest/15 text-forest font-semibold"
                   : "bg-muted text-muted-foreground"
               )}
             >
-              {hasAiExplanation
-                ? (explanation?.provider || "Gemini Flash")
-                : "0 Tokens Consumed (Preserves RPM/RPD)"}
+              {explanation?.is_ai_generated ? (explanation?.provider || "Gemini Flash") : "Not Generated (0 Tokens)"}
             </span>
           </div>
 
-          {hasAiExplanation && (
+          {explanation?.is_ai_generated && (
             <button
               onClick={handleGenerateAi}
               disabled={generatingAi}
@@ -412,14 +359,14 @@ export default function InterfaceDetailPage() {
           </div>
         )}
 
-        {!hasAiExplanation ? (
+        {!explanation?.is_ai_generated && !quotaNotice ? (
           <div className="my-8 flex flex-col items-center justify-center text-center">
             <div className="mb-3 flex size-10 items-center justify-center rounded-full bg-forest/10 text-forest">
               <Sparkles className="size-5" />
             </div>
             <h3 className="font-semibold text-charcoal">No AI Explanation Generated Yet</h3>
             <p className="mt-1 max-w-md text-xs text-muted-foreground">
-              To strictly conserve Gemini API quotas (5 RPM / 20 RPD limits), architectural explanations are generated only on demand for specific interfaces.
+              To conserve API tokens and prevent hitting rate limits, architectural explanations are generated only on request.
             </p>
             <button
               onClick={handleGenerateAi}
@@ -440,105 +387,32 @@ export default function InterfaceDetailPage() {
             </button>
           </div>
         ) : (
-          <div className="mt-6 space-y-6">
-            {/* 1. Root Cause Analysis */}
-            <div className="rounded-md border border-border bg-paper p-5 shadow-2xs">
-              <div className="flex items-center gap-2 border-b border-border/60 pb-3">
-                <span className="flex size-5 items-center justify-center rounded-full bg-clay/15 text-clay">
-                  <AlertTriangle className="size-3" />
-                </span>
-                <h3 className="font-display text-sm font-bold tracking-tight text-charcoal">Why It May Be Eroding</h3>
-              </div>
-              <p className="mt-3.5 text-sm leading-relaxed text-charcoal/90">
+          <div className="mt-5 grid gap-6 text-sm leading-relaxed md:grid-cols-2">
+            <div>
+              <h3 className="font-semibold text-charcoal">Why it may be eroding</h3>
+              <p className="mt-1 text-muted-foreground whitespace-pre-line">
                 {explanation?.explanation_text || explanation?.explanation || "Interface contains client-specific methods that should be segregated into cohesive sub-interfaces."}
               </p>
             </div>
-
-            {/* 2. Step-by-Step Refactoring Plan */}
-            <div className="rounded-md border border-border bg-paper p-5 shadow-2xs">
-              <div className="flex items-center gap-2 border-b border-border/60 pb-3">
-                <span className="flex size-5 items-center justify-center rounded-full bg-forest/15 text-forest">
-                  <CheckCircle2 className="size-3" />
-                </span>
-                <h3 className="font-display text-sm font-bold tracking-tight text-charcoal">Step-by-Step Refactoring Plan</h3>
-              </div>
-              <div className="mt-3.5 space-y-2.5">
-                {parseSteps(explanation?.refactoring_recommendation || explanation?.recommendation).map((step, idx) => (
-                  <div key={idx} className="flex items-start gap-3 rounded-sm border border-border/50 bg-cream/35 p-3.5 text-sm">
-                    <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-forest font-mono text-[11px] font-bold text-cream">
-                      {idx + 1}
-                    </span>
-                    <p className="leading-relaxed text-charcoal/90">{step}</p>
-                  </div>
-                ))}
-              </div>
+            <div>
+              <h3 className="font-semibold text-charcoal">Refactoring recommendation</h3>
+              <p className="mt-1 text-muted-foreground whitespace-pre-line">
+                {explanation?.refactoring_recommendation || explanation?.recommendation || "Segregate interface methods by client role to preserve the Interface Segregation Principle."}
+              </p>
             </div>
-
-            {/* 3 & 4: Suggested Interface Breakdown & Risks */}
-            <div className="grid gap-6 md:grid-cols-2">
-              {/* Suggested Interface Breakdown */}
-              <div className="rounded-md border border-border bg-paper p-5 shadow-2xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center gap-2 border-b border-border/60 pb-3">
-                    <span className="flex size-5 items-center justify-center rounded-full bg-forest/15 text-forest">
-                      <Layers className="size-3" />
-                    </span>
-                    <h3 className="font-display text-sm font-bold tracking-tight text-charcoal">Suggested Interface Breakdown</h3>
-                  </div>
-                  <div className="mt-3.5 space-y-3">
-                    {parseBreakdown(explanation?.responsibility_separation).map((subIface, idx) => (
-                      <div key={idx} className="rounded-sm border border-border/60 bg-cream/30 p-3">
-                        <div className="flex items-center gap-1.5 font-mono text-xs font-bold text-charcoal">
-                          <span className="font-normal text-muted-foreground">interface</span>
-                          <span className="text-forest font-semibold">{subIface.name}</span>
-                        </div>
-                        {subIface.methods.length > 0 && (
-                          <div className="mt-2.5 flex flex-wrap gap-1.5">
-                            {subIface.methods.map((m, mIdx) => (
-                              <span
-                                key={mIdx}
-                                className="rounded-sm border border-border/80 bg-paper px-2 py-0.5 font-mono text-[11px] text-charcoal shadow-2xs"
-                              >
-                                {m}{m.endsWith(')') ? '' : '()'}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
+            {explanation?.responsibility_separation && (
+              <div>
+                <h3 className="font-semibold text-charcoal">Suggested interface breakdown</h3>
+                <p className="mt-1 font-mono text-xs text-muted-foreground whitespace-pre-line">
+                  {explanation.responsibility_separation}
+                </p>
               </div>
-
-              {/* Risks & Mitigation */}
-              <div className="rounded-md border border-border bg-paper p-5 shadow-2xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center gap-2 border-b border-border/60 pb-3">
-                    <span className="flex size-5 items-center justify-center rounded-full bg-clay/15 text-clay">
-                      <ShieldAlert className="size-3" />
-                    </span>
-                    <h3 className="font-display text-sm font-bold tracking-tight text-charcoal">Risks & Migration Strategy</h3>
-                  </div>
-
-                  {(() => {
-                    const parsedRisk = parseRisks(explanation?.risk_analysis);
-                    return (
-                      <div className="mt-3.5 space-y-3 text-sm">
-                        <div className="rounded-sm border border-clay/30 bg-clay/5 p-3.5">
-                          <p className="font-mono text-[10.5px] font-bold uppercase tracking-wider text-clay">Potential Risk</p>
-                          <p className="mt-1 leading-relaxed text-charcoal/90">{parsedRisk.risk}</p>
-                        </div>
-                        {parsedRisk.mitigation && (
-                          <div className="rounded-sm border border-healthy/50 bg-healthy/25 p-3.5">
-                            <p className="font-mono text-[10.5px] font-bold uppercase tracking-wider text-forest">Mitigation Strategy</p>
-                            <p className="mt-1 leading-relaxed text-charcoal/90">{parsedRisk.mitigation}</p>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
+            )}
+            <div>
+              <h3 className="font-semibold text-charcoal">Risks & trade-offs</h3>
+              <p className="mt-1 text-muted-foreground whitespace-pre-line">
+                {explanation?.risk_analysis || "Check downstream client callsites and test mocks before splitting methods across contracts."}
+              </p>
             </div>
           </div>
         )}

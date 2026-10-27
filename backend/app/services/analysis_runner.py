@@ -396,10 +396,80 @@ def run_analysis_pipeline(app, run_id: int, max_commits: int = 50):
                         )
                         db.session.add(cp_entity)
 
-            # Stage 10: Finalize metrics (AI explanations deferred to on-demand to conserve RPM/RPD)
-            run.stage = "10/11 Preparing interface metrics and on-demand endpoints"
-            run.progress_percent = 95.0
+            # Stage 10: AI explanation generation (prioritize top eroded interfaces for Gemini)
+            run.stage = "10/11 AI explanation generation"
+            run.progress_percent = 90.0
             db.session.commit()
+
+            # Collect interfaces with their latest snapshot and findings
+            candidate_list = []
+            for iface in final_interfaces_data:
+                iface_name = iface["name"]
+                key = (iface["file_path"], iface_name)
+                if key in interface_cache:
+                    if_obj = interface_cache[key]
+                    latest_snap = (
+                        InterfaceSnapshot.query.filter_by(interface_id=if_obj.interface_id, analysis_run_id=run.run_id)
+                        .order_by(InterfaceSnapshot.snapshot_id.desc())
+                        .first()
+                    )
+                    if latest_snap:
+                        candidate_list.append((iface, if_obj, latest_snap))
+
+            # Sort candidate interfaces by health_score ascending (most eroded first)
+            candidate_list.sort(key=lambda item: item[2].health_score if item[2].health_score is not None else 100)
+
+            ai_calls_made = 0
+            MAX_AI_CALLS = 3  # Top 3 most eroded get Gemini LLM; healthy ones use deterministic engine
+
+            def _to_clean_text(val):
+                if val is None:
+                    return None
+                if isinstance(val, (dict, list)):
+                    return json.dumps(val, indent=2)
+                return str(val)
+
+            for iface, if_obj, latest_snap in candidate_list:
+                iface_name = iface["name"]
+                implementors = [c for c in final_classes_data if iface_name in c.get("implements", [])]
+                if_findings = [f for f in all_findings if f.get("category") == "isp_violation" or iface_name in str(f.get("description", ""))]
+                
+                context = {
+                    "interface_name": iface_name,
+                    "methods": iface.get("methods", []),
+                    "implementing_classes": implementors,
+                    "findings": if_findings,
+                    "metrics": {
+                        "health_score": latest_snap.health_score,
+                        "method_count": latest_snap.method_count,
+                        "cbo": latest_snap.cbo,
+                        "lcom": latest_snap.lcom,
+                        "churn": latest_snap.churn,
+                    },
+                }
+
+                # Default to fast deterministic expert engine during full scans (0 token consumption, 0 RPM/RPD).
+                # Deep Gemini generation is available on-demand when the user clicks 'Generate with Gemini' in the Case File.
+                exp_data = _generate_deterministic_explanation(context)
+
+                try:
+                    exp_entity = Explanation(
+                        snapshot_id=latest_snap.snapshot_id,
+                        interface_id=if_obj.interface_id,
+                        explanation_text=_to_clean_text(exp_data.get("explanation")),
+                        suggestion_text=_to_clean_text(exp_data.get("recommendation")),
+                        impact_text=_to_clean_text(exp_data.get("impact")),
+                        refactoring_recommendation=_to_clean_text(exp_data.get("recommendation")),
+                        responsibility_separation=_to_clean_text(exp_data.get("responsibility_separation")),
+                        risk_analysis=_to_clean_text(exp_data.get("risks")),
+                        is_ai_generated=bool(exp_data.get("is_ai_generated", False)),
+                        provider=str(exp_data.get("provider", "deterministic_expert_engine")),
+                    )
+                    db.session.add(exp_entity)
+                    db.session.flush()
+                except Exception as exp_err:
+                    logger.warning(f"Failed to record explanation for {iface_name}: {exp_err}")
+                    db.session.rollback()
 
             # Stage 11: Persistence and completion
             run.stage = "11/11 Persistence and completion"

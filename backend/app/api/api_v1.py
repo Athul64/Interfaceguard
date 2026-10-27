@@ -203,17 +203,16 @@ def get_analysis_summary(run_id):
     repo = Repository.query.get(run.repository_id)
 
     # Latest snapshots for interfaces in this run
-    snaps = (
-        InterfaceSnapshot.query.filter_by(analysis_run_id=run.run_id)
-        .options(db.joinedload(InterfaceSnapshot.interface))
-        .order_by(InterfaceSnapshot.snapshot_id.desc())
-        .all()
-    )
-    latest_by_iface = {}
-    for s in snaps:
-        if s.interface_id not in latest_by_iface:
-            latest_by_iface[s.interface_id] = (s.interface, s)
-    latest_snaps = list(latest_by_iface.values())
+    interfaces = Interface.query.filter_by(repository_id=run.repository_id).all()
+    latest_snaps = []
+    for iface in interfaces:
+        snap = (
+            InterfaceSnapshot.query.filter_by(interface_id=iface.interface_id, analysis_run_id=run.run_id)
+            .order_by(InterfaceSnapshot.snapshot_id.desc())
+            .first()
+        )
+        if snap:
+            latest_snaps.append((iface, snap))
 
     # Health distribution
     health_dist = {"healthy": 0, "warning": 0, "high": 0, "critical": 0}
@@ -221,8 +220,6 @@ def get_analysis_summary(run_id):
 
     most_eroded = []
     for iface, snap in latest_snaps:
-        if not iface:
-            continue
         sev = snap.severity or "healthy"
         health_dist[sev] = health_dist.get(sev, 0) + 1
         tr = snap.trend or "stable"
@@ -254,20 +251,17 @@ def get_analysis_summary(run_id):
     # Historical erosion index trend across commits
     commits = Commit.query.filter_by(repository_id=run.repository_id).order_by(Commit.commit_date).all()
     history_trend = []
-    snaps_by_commit = {}
-    for s in snaps:
-        if s.health_score is not None:
-            snaps_by_commit.setdefault(s.commit_id, []).append(s.health_score)
-
     for c in commits:
-        scores = snaps_by_commit.get(c.commit_id)
-        if scores:
-            avg_score = round(sum(scores) / len(scores), 1)
+        snaps_at_c = (
+            InterfaceSnapshot.query.filter_by(commit_id=c.commit_id, analysis_run_id=run.run_id).all()
+        )
+        if snaps_at_c:
+            avg_score = round(sum(s.health_score for s in snaps_at_c) / len(snaps_at_c), 1)
             history_trend.append({
                 "commit_hash": c.commit_hash[:7],
                 "commit_date": c.commit_date.strftime("%Y-%m-%d") if c.commit_date else None,
                 "project_erosion_index": avg_score,
-                "interface_count": len(scores),
+                "interface_count": len(snaps_at_c),
             })
 
     return jsonify({
@@ -275,7 +269,7 @@ def get_analysis_summary(run_id):
         "repository": repo.to_dict() if repo else None,
         "project_erosion_index": run.project_erosion_index,
         "processed_commits": run.processed_commits,
-        "total_interfaces": len(latest_snaps),
+        "total_interfaces": len(interfaces),
         "health_distribution": health_dist,
         "trend_distribution": trend_dist,
         "findings_by_category": categories,
@@ -298,6 +292,9 @@ def list_analysis_interfaces(run_id):
     trend_filter = request.args.get("trend", "").strip().lower()
     package_filter = request.args.get("package", "").strip()
 
+    interfaces = Interface.query.filter_by(repository_id=run.repository_id).all()
+    data = []
+
     # Map filter tokens to backend severity vocabulary
     target_sevs = set()
     if severity_filter:
@@ -310,45 +307,20 @@ def list_analysis_interfaces(run_id):
             elif p:
                 target_sevs.add(p)
 
-    # 1. Fetch latest snapshot per interface for this run in a single batch query
-    snaps = (
-        InterfaceSnapshot.query.filter_by(analysis_run_id=run.run_id)
-        .options(db.joinedload(InterfaceSnapshot.interface))
-        .order_by(InterfaceSnapshot.snapshot_id.desc())
-        .all()
-    )
-    latest_by_iface = {}
-    for s in snaps:
-        if s.interface_id not in latest_by_iface:
-            latest_by_iface[s.interface_id] = s
-
-    # 2. Batch findings count per interface
-    findings_counts = dict(
-        db.session.query(Finding.interface_id, db.func.count(Finding.finding_id))
-        .filter(Finding.analysis_run_id == run.run_id)
-        .group_by(Finding.interface_id)
-        .all()
-    )
-
-    # 3. Batch change points per interface
-    change_points_list = (
-        ChangePoint.query.filter_by(analysis_run_id=run.run_id)
-        .order_by(ChangePoint.change_point_id.desc())
-        .all()
-    )
-    change_points_by_iface = {}
-    for cp in change_points_list:
-        if cp.interface_id not in change_points_by_iface:
-            change_points_by_iface[cp.interface_id] = cp
-
-    data = []
-    for iface_id, snap in latest_by_iface.items():
-        iface = snap.interface
-        if not iface:
-            continue
-
-        findings_count = findings_counts.get(iface_id, 0)
-        change_point = change_points_by_iface.get(iface_id)
+    for iface in interfaces:
+        snap = (
+            InterfaceSnapshot.query.filter_by(interface_id=iface.interface_id, analysis_run_id=run.run_id)
+            .order_by(InterfaceSnapshot.snapshot_id.desc())
+            .first()
+        )
+        findings_count = Finding.query.filter_by(
+            analysis_run_id=run.run_id, interface_id=iface.interface_id
+        ).count()
+        change_point = (
+            ChangePoint.query.filter_by(analysis_run_id=run.run_id, interface_id=iface.interface_id)
+            .order_by(ChangePoint.change_point_id.desc())
+            .first()
+        )
 
         h_score = snap.health_score if snap and snap.health_score is not None else 100.0
         s_sev = snap.severity if snap and snap.severity else "healthy"
@@ -356,19 +328,6 @@ def list_analysis_interfaces(run_id):
         s_methods = snap.method_count if snap and snap.method_count is not None else 0
         s_isp = snap.isp_violations_count if snap and snap.isp_violations_count is not None else 0
         s_smells = snap.smells_count if snap and snap.smells_count is not None else 0
-
-        # Apply search
-        if search and search not in iface.name.lower() and search not in (iface.package or "").lower():
-            continue
-        # Apply severity filter
-        if target_sevs and s_sev.lower() not in target_sevs:
-            continue
-        # Apply trend filter
-        if trend_filter and s_trend.lower() != trend_filter:
-            continue
-        # Apply package filter
-        if package_filter and (iface.package or "") != package_filter:
-            continue
 
         row = {
             "interface_id": iface.interface_id,
@@ -386,6 +345,20 @@ def list_analysis_interfaces(run_id):
             "isp_violations_count": s_isp,
             "smells_count": s_smells,
         }
+
+        # Apply search
+        if search and search not in iface.name.lower() and search not in (iface.package or "").lower():
+            continue
+        # Apply severity filter
+        if target_sevs and s_sev.lower() not in target_sevs:
+            continue
+        # Apply trend filter
+        if trend_filter and s_trend.lower() != trend_filter:
+            continue
+        # Apply package filter
+        if package_filter and (iface.package or "") != package_filter:
+            continue
+
         data.append(row)
 
     # Sort
@@ -566,12 +539,12 @@ def explain_interface_on_demand(run_id, interface_identifier):
     explanation.refactoring_recommendation = _to_clean_text(exp_data.get("recommendation"))
     explanation.responsibility_separation = _to_clean_text(exp_data.get("responsibility_separation"))
     explanation.risk_analysis = _to_clean_text(exp_data.get("risks"))
-    explanation.is_ai_generated = True
-    explanation.provider = str(exp_data.get("provider", "gemini-1.5-flash"))
+    explanation.is_ai_generated = bool(exp_data.get("is_ai_generated", False))
+    explanation.provider = str(exp_data.get("provider", "gemini-flash-lite-latest"))
     db.session.commit()
 
     resp_dict = explanation.to_dict()
-    if exp_data.get("quota_exceeded") or exp_data.get("quota_notice"):
+    if exp_data.get("quota_exceeded"):
         resp_dict["quota_exceeded"] = True
         resp_dict["quota_notice"] = exp_data.get("quota_notice")
 

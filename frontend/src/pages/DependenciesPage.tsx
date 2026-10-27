@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Maximize, Minus, Plus, RotateCcw, Search, Loader2 } from "lucide-react";
 import { btn, EmptyState, PageHeader, Shell } from "@/components/ig";
@@ -10,13 +10,13 @@ const slug = (n: string) => n.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase();
 
 export default function DependenciesPage() {
   const { currentRun, activeRunId, repositories } = useApp();
-  const [rawNodes, setRawNodes] = useState<any[]>([]);
+  const [nodes, setNodes] = useState<any[]>([]);
   const [edges, setEdges] = useState<[string, string, boolean][]>([]);
   const [loading, setLoading] = useState(true);
 
   const [sel, setSel] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
-  const [cyclesOnly, setCyclesOnly] = useState(true);
+  const [cyclesOnly, setCyclesOnly] = useState(false);
   const [q, setQ] = useState("");
 
   const targetRunId = currentRun?.run_id || activeRunId || repositories[0]?.latest_run?.run_id;
@@ -24,7 +24,7 @@ export default function DependenciesPage() {
   useEffect(() => {
     if (!targetRunId) {
       setLoading(false);
-      setRawNodes([]);
+      setNodes([]);
       setEdges([]);
       return;
     }
@@ -36,45 +36,38 @@ export default function DependenciesPage() {
       .then((res) => {
         if (!isMounted) return;
 
-        const incomingNodes = res.nodes || [];
-        const incomingEdges = res.edges || [];
+        const rawNodes = res.nodes || [];
+        const rawEdges = res.edges || [];
 
-        // Deduplicate nodes by id
-        const nodeMap = new Map<string, any>();
-        incomingNodes.forEach((n: any) => {
-          const id = n.id || n.label;
-          if (id && !nodeMap.has(id)) {
-            nodeMap.set(id, {
-              id,
-              label: n.label || id,
-              kind: (n.type?.toLowerCase() === "class" ? "class" : "interface") as "class" | "interface",
-              cycle: Boolean(n.in_cycle),
-              pkg: n.package || "package",
-            });
-          }
+        const totalNodes = rawNodes.length;
+        const centerX = 500;
+        const centerY = 300;
+        const radius = Math.max(120, Math.min(240, 60 + totalNodes * 18));
+
+        const computedNodes = rawNodes.map((n: any, idx: number) => {
+          const angle = (idx / (totalNodes || 1)) * 2 * Math.PI - Math.PI / 2;
+          return {
+            id: n.id || n.label,
+            label: n.label || n.id,
+            kind: (n.type?.toLowerCase() === "class" ? "class" : "interface") as "class" | "interface",
+            cycle: Boolean(n.in_cycle),
+            x: Math.round(centerX + radius * Math.cos(angle)),
+            y: Math.round(centerY + radius * Math.sin(angle)),
+            pkg: n.package || "package",
+          };
         });
 
-        const computedEdges: [string, string, boolean][] = incomingEdges.map((e: any) => [
+        const computedEdges: [string, string, boolean][] = rawEdges.map((e: any) => [
           e.source_name,
           e.target_name,
           Boolean(e.in_cycle),
         ]);
 
-        const uniqueNodes = Array.from(nodeMap.values());
-        const hasCycles = computedEdges.some((e) => e[2]);
-
-        setRawNodes(uniqueNodes);
+        setNodes(computedNodes);
         setEdges(computedEdges);
-        // Default to cyclesOnly if cycles exist
-        setCyclesOnly(hasCycles);
-
-        const firstCycle = uniqueNodes.find((n) => n.cycle);
-        if (firstCycle) {
-          setSel(firstCycle.id);
-        } else if (uniqueNodes.length > 0) {
-          setSel(uniqueNodes[0].id);
+        if (computedNodes.length > 0 && !sel) {
+          setSel(computedNodes[0].id);
         }
-
         setLoading(false);
       })
       .catch((err) => {
@@ -87,55 +80,17 @@ export default function DependenciesPage() {
     };
   }, [targetRunId]);
 
-  // Filter nodes according to search and cyclesOnly filter
-  const filteredNodes = useMemo(() => {
-    return rawNodes.filter((n) => {
-      const matchSearch = !q || n.id.toLowerCase().includes(q.toLowerCase());
-      const matchCycle = !cyclesOnly || n.cycle;
-      return matchSearch && matchCycle;
-    });
-  }, [rawNodes, cyclesOnly, q]);
-
-  // If repository is massive and cyclesOnly is off, limit display to top connected nodes so it stays readable
-  const displayNodes = useMemo(() => {
-    if (!cyclesOnly && filteredNodes.length > 32) {
-      const degree: Record<string, number> = {};
-      edges.forEach(([u, v]) => {
-        degree[u] = (degree[u] || 0) + 1;
-        degree[v] = (degree[v] || 0) + 1;
-      });
-      return [...filteredNodes].sort((a, b) => (degree[b.id] || 0) - (degree[a.id] || 0)).slice(0, 32);
-    }
-    return filteredNodes;
-  }, [filteredNodes, cyclesOnly, edges]);
-
-  // Layout visible nodes evenly around the circle with comfortable separation
-  const shown = useMemo(() => {
-    const count = displayNodes.length;
-    const centerX = 500;
-    const centerY = 300;
-    const radius = count <= 6 ? 150 : count <= 12 ? 190 : count <= 20 ? 230 : 255;
-
-    return displayNodes.map((n, idx) => {
-      const angle = (idx / (count || 1)) * 2 * Math.PI - Math.PI / 2;
-      return {
-        ...n,
-        x: Math.round(centerX + radius * Math.cos(angle)),
-        y: Math.round(centerY + radius * Math.sin(angle)),
-      };
-    });
-  }, [displayNodes]);
-
-  const ids = useMemo(() => new Set(shown.map((n) => n.id)), [shown]);
-  const pos = useMemo(() => Object.fromEntries(shown.map((n) => [n.id, n])), [shown]);
-  const near = useMemo(() => new Set(edges.filter((e) => e[0] === sel || e[1] === sel).flatMap((e) => [e[0], e[1]])), [edges, sel]);
-  const node = useMemo(() => shown.find((n) => n.id === sel) || rawNodes.find((n) => n.id === sel), [shown, rawNodes, sel]);
-  const cycleCount = useMemo(() => edges.filter((e) => e[2]).length, [edges]);
+  const near = new Set(edges.filter((e) => e[0] === sel || e[1] === sel).flatMap((e) => [e[0], e[1]]));
+  const pos = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  const node = nodes.find((n) => n.id === sel);
+  const shown = nodes.filter((n) => (!cyclesOnly || n.cycle) && n.id.toLowerCase().includes(q.toLowerCase()));
+  const ids = new Set(shown.map((n) => n.id));
+  const cycleCount = edges.filter((e) => e[2]).length;
 
   return (
     <Shell crumbs={["Dependencies"]}>
       <PageHeader
-        eyebrow={`${rawNodes.length} types · ${cycleCount} cycle edge${cycleCount === 1 ? "" : "s"} detected`}
+        eyebrow={`${nodes.length} types · ${cycleCount} cycle edge${cycleCount === 1 ? "" : "s"} detected`}
         title="Dependency graph"
         accent="where coupling hides."
       />
@@ -145,7 +100,7 @@ export default function DependenciesPage() {
           <Loader2 className="size-6 animate-spin text-forest" />
           <p className="font-mono text-xs text-muted-foreground">Constructing type dependency graph...</p>
         </div>
-      ) : rawNodes.length === 0 ? (
+      ) : nodes.length === 0 ? (
         <div className="mt-8">
           <EmptyState
             title={!targetRunId ? "No repository analyzed." : "No dependencies discovered."}
@@ -217,20 +172,6 @@ export default function DependenciesPage() {
                   <path d="M0 0L10 5L0 10z" fill="var(--clay)" />
                 </marker>
               </defs>
-
-              {shown.length === 0 && (
-                <text
-                  x="500"
-                  y="300"
-                  textAnchor="middle"
-                  fontFamily="IBM Plex Mono"
-                  fontSize="13"
-                  fill="var(--charcoal)"
-                  opacity="0.6"
-                >
-                  {cyclesOnly ? "No dependency cycles detected in this repository." : "No types match your search filter."}
-                </text>
-              )}
 
               {edges
                 .filter(([a, b]) => ids.has(a) && ids.has(b) && pos[a] && pos[b])
