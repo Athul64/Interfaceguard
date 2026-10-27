@@ -67,6 +67,11 @@ def generate_explanation(
                 logger.warning(f"Gemini API HTTP {status_code} error: {http_err}. Falling back to deterministic engine.")
             except Exception as exc:
                 logger.warning(f"LLM generation failed ({exc}). Falling back to deterministic engine.")
+                fallback = _generate_deterministic_explanation(context)
+                fallback["quota_exceeded"] = True
+                fallback["quota_notice"] = "Gemini API unavailable or invalid key. Displaying architectural analysis generated via InterfaceGuard's deterministic expert engine."
+                _EXPLANATION_CACHE[cache_key] = fallback
+                return fallback
 
     # Deterministic fallback engine (0 API tokens consumed)
     fallback = _generate_deterministic_explanation(context)
@@ -74,7 +79,9 @@ def generate_explanation(
     return fallback
 
 def _call_gemini_api(context: Dict[str, Any], api_key: str) -> Dict[str, Any]:
-    model = Config.LLM_MODEL or "gemini-flash-lite-latest"
+    model = Config.LLM_MODEL or "gemini-1.5-flash"
+    if model in ("gemini-flash-lite-latest", "gemini-flash-lite"):
+        model = "gemini-1.5-flash"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     prompt = f"""
 You are an expert Software Architecture and Object-Oriented Design Auditor.
